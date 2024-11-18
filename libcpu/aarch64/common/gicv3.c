@@ -139,6 +139,7 @@ static unsigned int _gic_max_irq;
 #define GIC_RDIST_TYPER(hw_base)            HWREG64((hw_base) + 0x008U)
 #define GIC_RDIST_TSTATUSR(hw_base)         HWREG32((hw_base) + 0x010U)
 #define GIC_RDIST_WAKER(hw_base)            HWREG32((hw_base) + 0x014U)
+#define GIC_RDIST_PWRR(hw_base)             HWREG32((hw_base) + 0x024U)
 #define GIC_RDIST_SETLPIR(hw_base)          HWREG32((hw_base) + 0x040U)
 #define GIC_RDIST_CLRLPIR(hw_base)          HWREG32((hw_base) + 0x048U)
 #define GIC_RDIST_PROPBASER(hw_base)        HWREG32((hw_base) + 0x070U)
@@ -211,15 +212,17 @@ void arm_gic_umask(rt_uint64_t index, int irq)
     irq = irq - _gic_table[index].offset;
     RT_ASSERT(irq >= 0);
 
+    rt_int32_t cpu_id = rt_hw_cpu_id();
+
     if (irq < 32)
     {
-        rt_int32_t cpu_id = rt_hw_cpu_id();
-
         GIC_RDISTSGI_ISENABLER0(_gic_table[index].redist_hw_base[cpu_id]) = mask;
     }
     else
     {
         GIC_DIST_ENABLE_SET(_gic_table[index].dist_hw_base, irq) = mask;
+        //set irq affin in curing cpu
+        GIC_DIST_IROUTER(_gic_table[index].dist_hw_base, irq) = (cpu_id << 8) | (GICV3_ROUTED_TO_SPEC << 31);
     }
 }
 
@@ -660,6 +663,11 @@ int arm_gic_dist_init(rt_uint64_t index, rt_uint64_t dist_base, int irq_start)
         _gic_max_irq = ARM_GIC_NR_IRQS;
     }
 
+    /* gicd have init in atf or kernel, do not need init here again*/
+#ifdef SOC_T536_AARCH64
+    return 0;
+#endif
+
     GIC_DIST_CTRL(dist_base) = 0;
     /* Wait for register write pending */
     arm_gicv3_wait_rwp(0, 32);
@@ -731,24 +739,13 @@ int arm_gic_redist_init(rt_uint64_t index, rt_uint64_t redist_base)
 {
     int i;
     int cpu_id = rt_hw_cpu_id();
-    static int master_cpu_id = -1;
 
     RT_ASSERT(index < ARM_GIC_MAX_NR);
 
-    if (master_cpu_id < 0)
-    {
-        master_cpu_id = cpu_id;
-        rt_hw_cpu_dcache_ops(RT_HW_CACHE_FLUSH, &master_cpu_id, sizeof(master_cpu_id));
-    }
-
-    if (!_gic_table[index].redist_hw_base[master_cpu_id])
-    {
-        _gic_table[index].redist_hw_base[master_cpu_id] = redist_base;
-    }
-    redist_base = _gic_table[index].redist_hw_base[master_cpu_id];
-
     redist_base += cpu_id * (2 << 16);
     _gic_table[index].redist_hw_base[cpu_id] = redist_base;
+
+    GIC_RDIST_PWRR(redist_base) |= 0x02;
 
     /* redistributor enable */
     GIC_RDIST_WAKER(redist_base) &= ~(1 << 1);

@@ -21,6 +21,7 @@ rt_hw_cpu_id_set:
     msr tpidr_el1, x0
     ret
 
+#if 0
 /*
 int rt_hw_cpu_id(void)
 */
@@ -29,6 +30,16 @@ int rt_hw_cpu_id(void)
 rt_hw_cpu_id:
    mrs x0, tpidr_el1           /* MPIDR_EL1: Multi-Processor Affinity Register */
    ret
+#else
+.equ MPIDR_EL1_AFF_WIDTH, (8)
+.equ MPIDR_EL1_AFF1_LSB, (8)
+.globl rt_hw_cpu_id
+.type  rt_hw_cpu_id, %function
+rt_hw_cpu_id:
+   mrs x0, mpidr_el1           /* MPIDR_EL1: Multi-Processor Affinity Register */
+   ubfx x0, x0, MPIDR_EL1_AFF1_LSB, #MPIDR_EL1_AFF_WIDTH
+   ret
+#endif
 
 /*
 void rt_hw_set_process_id(size_t id)
